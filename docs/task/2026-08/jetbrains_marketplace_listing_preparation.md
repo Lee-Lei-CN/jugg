@@ -39,7 +39,7 @@
 | 源码 | `https://github.com/tencentmusic/jugg` |
 | 文档 | 发布前填写公开可访问的 Wiki 地址；仓库内 Wiki 不能直接作为用户链接 |
 | Issue tracker | `https://github.com/tencentmusic/jugg/issues` |
-| Vendor | `sickworm`；当前 `plugin.xml` 已声明 `https://sickworm.com` 与 `ch.operation@gmail.com` |
+| Vendor | `TCL`；当前 `plugin.xml` 已声明 `https://jugg.tclking.com` 与 `lei45.li@tcl.com` |
 | Ads | No；若页面或插件后续出现推广第三方服务的商业内容，需要重新声明 |
 
 ### 产品描述
