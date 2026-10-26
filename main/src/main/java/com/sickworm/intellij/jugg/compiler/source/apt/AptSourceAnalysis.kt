@@ -42,9 +42,14 @@ class AptSourceAnalysis(val files: List<CompileFile>) {
     }.getOrThrow()
     fun kotlin(file: File): KtFile = kotlinTrees.getOrPut(file.canonicalPath) {
         runCatching {
-            BaseKotlinJuggAptProcessor.parseSnapshot(file.name, text(file)).also {
-                check(PsiTreeUtil.findChildOfType(it, PsiErrorElement::class.java) == null) { "Cannot parse $file" }
+            // Normalize only the read-only tree; rewrite processors need offsets in the original text.
+            val content = text(file).removePrefix("\uFEFF").replace("\r\n", "\n").replace('\r', '\n')
+            val tree = BaseKotlinJuggAptProcessor.parseSnapshot(file.name, content)
+            val parseError = PsiTreeUtil.findChildOfType(tree, PsiErrorElement::class.java)
+            if (parseError != null) {
+                throw IllegalStateException("Cannot parse $file at offset ${parseError.textOffset}: ${parseError.errorDescription}")
             }
+            tree
         }
     }.getOrThrow()
     fun facts(file: File): Facts = sourceFacts.getOrPut(file.canonicalPath) {

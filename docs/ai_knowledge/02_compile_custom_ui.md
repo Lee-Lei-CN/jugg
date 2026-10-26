@@ -86,7 +86,7 @@ BaseCompileContext.customCompilers
 
 父类关系变化时，`ARouterBaseline.relatedClasses()` 定位已知注解声明及字段类型使用方，在普通语言编译覆盖旧父类 class 前比较相关输入。必须先确认全部相关输入可判断，才发布完整聚合索引；不能因部分输入有变化而忽略其他输入的分析失败。
 
-`JuggAptCompiler` 每模块每轮创建一个 `AptSourceAnalysis`，供 ARouter、Kuikly 和外部处理器共享源码快照；改写文件后，后续消费者必须读到失效重建的快照。`IJuggAptProcessor.process()` 使用统一四参数入口，外部扩展需同步适配并重新编译。
+`JuggAptCompiler` 每模块每轮创建一个 `AptSourceAnalysis`，供 ARouter、Kuikly 和外部处理器共享源码快照；改写文件后，后续消费者必须读到失效重建的快照。只读 Kotlin 分析在创建 PSI 前移除文件头 BOM，并将 CRLF/CR 换行归一化为 LF，避免合法 Windows 源码被误判为语法错误；原始文本和用于源码改写的解析入口保持原样，避免位置偏移失配。真实语法错误保留具体解析原因和归一化文本中的错误偏移。`IJuggAptProcessor.process()` 使用统一四参数入口，外部扩展需同步适配并重新编译。
 
 ARouter 的 `AptSemanticResolver` 只在本轮准备期间复用类型和源码查询结果，包括未找到的空结果，避免重复遍历依赖源码路径和打开 classpath JAR。下一轮重新查询，不缓存跨轮缺失状态。
 
@@ -110,7 +110,7 @@ KSP 产物复用同一 checkpoint 和 failClosed 边界；生成类身份按 pac
 
 发布成功后，ARouter 将本轮 Java/Kotlin 源码尽力同步到模块的 Gradle generated source 目录，供 IDE 查看与跳转。APT/KAPT 优先沿用当前生成文件所在的模块生成目录，否则按项目依赖选择 `ap_generated_sources/<variant>/out` 或 `source/kapt/<variant>`；KSP 优先沿用模块源码根中的实际 KSP 输出位置，保留 `java/`、`kotlin/` 布局，否则使用 `ksp/<variant>`。同步只覆盖本轮文件，不清空共享目录；路径解析或复制失败时记录包含模块、目录及异常的 warn，继续使用 Jugg 发布目录参与编译。生成失败或类集合收缩时不执行同步；同步发生在语言编译之前，不代表编译或部署成功。
 
-相关检测或完整聚合输入准备失败时，warn 指明受影响文件及原因，说明“本模块本轮跳过生成，索引可能滞后”，其他处理器和普通编译继续。真实 APT 执行失败、生成类收缩和生成文件直接语言诊断保留 failClosed。正常 Java 编译更新 javaClassPath，Kotlin 更新 kotlinClassPath，这些业务 class 是下一轮比较依据；生成目录、业务 class 和设备部署不是同时提交的事务。检测跳过而普通编译成功时，业务 class 可已新、旧索引仍滞后，不保证再次提交相同输入能够补生成；完整 Gradle 构建可恢复一致状态。
+相关检测或完整聚合输入准备失败时，仅在 debug 文件日志中记录受影响文件、原因及异常栈，说明“本模块本轮跳过生成，索引可能滞后”，不向正常编译输出 warn；其他处理器和普通编译继续。真实 APT 执行失败、生成类收缩和生成文件直接语言诊断保留 failClosed。正常 Java 编译更新 javaClassPath，Kotlin 更新 kotlinClassPath，这些业务 class 是下一轮比较依据；生成目录、业务 class 和设备部署不是同时提交的事务。检测跳过而普通编译成功时，业务 class 可已新、旧索引仍滞后，不保证再次提交相同输入能够补生成；完整 Gradle 构建可恢复一致状态。
 
 APT 成功但语言编译失败时保留已有 changed/compiled/staging/deployed 跟踪，业务 class 仍有差异则下一次请求允许再次聚合 APT。pending 不替代新输入比较，重新生成后消费最新产物；已消费的索引不会反复加入普通轮次。D8 或部署失败后若业务 class 输入已相同，跳过 APT 并继续既有下游重试。processor JAR、依赖和选项变化交给工程模型与完整 Gradle 构建，不维护环境摘要或独立原地 JAR 替换检测。
 

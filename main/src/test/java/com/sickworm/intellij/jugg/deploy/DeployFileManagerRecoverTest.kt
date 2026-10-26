@@ -9,6 +9,7 @@ import com.sickworm.intellij.jugg.project.JuggPathManager
 import com.sickworm.intellij.jugg.project.data.ModuleInfo
 import kotlinx.coroutines.Job
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -25,6 +26,34 @@ class DeployFileManagerRecoverTest {
         override fun runBackgroundSafe(jobName: String, delayMs: Long, isNeedLog: Boolean, action: Runnable): Job {
             action.run()
             return Job()
+        }
+    }
+
+    @Test
+    fun initShouldDeleteExtractedClassesAndKeepOtherTemporaryFiles() {
+        val testRoot = Files.createTempDirectory("deploy-extracted-classes-test").toFile()
+        val pathManager = JuggPathManager(testRoot, globalJuggRootDir = File(testRoot, "global"))
+        val extractedClassesDir = pathManager.extractedClassesDir
+        val extractedClass = File(extractedClassesDir, "com/example/Dependency.class")
+        val legacyClass = File(pathManager.tmpDir, "com/example/Legacy.class")
+        val diagnosticsFile = File(pathManager.diagnosticsDir, "report/log.txt")
+        listOf(extractedClass, legacyClass, diagnosticsFile).forEach {
+            it.parentFile.mkdirs()
+            it.writeText("preserved content")
+        }
+        val deployFileManager = DeployFileManager(pathManager, immediateRunner, logger)
+        try {
+            deployFileManager.init(emptyList(), emptyList(), resetFilesBeforeTimeMill = null)
+
+            assertFalse(extractedClassesDir.exists())
+            assertEquals("preserved content", legacyClass.readText())
+            assertEquals("preserved content", diagnosticsFile.readText())
+
+            deployFileManager.init(emptyList(), emptyList(), resetFilesBeforeTimeMill = null)
+            assertFalse(extractedClassesDir.exists())
+        } finally {
+            deployFileManager.dispose()
+            testRoot.deleteRecursively()
         }
     }
 

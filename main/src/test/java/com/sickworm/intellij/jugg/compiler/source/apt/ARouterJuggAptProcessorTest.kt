@@ -918,17 +918,12 @@ class ARouterJuggAptProcessorTest {
     }
 
     @Test
-    fun missingKnownBusinessClassesWarnInsteadOfUsingEmptyOldInputs() {
+    fun missingKnownBusinessClassesSkipInsteadOfUsingEmptyOldInputs() {
         establishGradleBaseline()
         File(module.buildPathInfo.javaClassPath, "demo/Screen.class").delete()
         whenever(context.containsApkClass(any())).thenReturn(listOf(fragmentNode("demo/Screen")))
         source = writeSource("@Route(path = \"/demo/next\")")
-        val logger = org.mockito.kotlin.spy(context.logger)
-        whenever(context.logger).thenReturn(logger)
         assertTrue(generate().isEmpty())
-        org.mockito.kotlin.verify(logger).warn(org.mockito.kotlin.argThat<String> {
-            contains("Business classes are missing") && contains("indexes may be stale")
-        }, any<Throwable>())
     }
 
     @Test
@@ -1124,6 +1119,29 @@ class ARouterJuggAptProcessorTest {
     }
 
     @Test
+    fun kotlinRouteGenerationAcceptsWindowsTextFormatsWithoutRewritingSources() {
+        val toolchain = System.getProperty("arouter.test.kotlin").split(File.pathSeparator).map(::File)
+        module = module.copy(kotlinPlugins = toolchain, kotlinJvmTarget = "1.8")
+        libraryJars += toolchain.filter { it.name.startsWith("kotlin-stdlib-") || it.name.startsWith("annotations-") }
+        assertTrue(source.file.delete())
+        val kotlin = File(source.baseDir, "demo/KotlinScreen.kt")
+        source = CompileFile(CompileFile.Type.Kotlin, kotlin, source.baseDir, module)
+        updateModule()
+        val formats = listOf("" to "\n", "" to "\r\n", "" to "\r", "\uFEFF" to "\n", "\uFEFF" to "\r\n")
+        formats.forEachIndexed { index, (prefix, newline) ->
+            val route = "/demo/format$index"
+            val content = prefix + listOf("package demo",
+                "@com.alibaba.android.arouter.facade.annotation.Route(path = \"$route\")",
+                "class KotlinScreen : android.app.Activity()").joinToString(newline)
+            kotlin.writeText(content)
+            val generated = generate()
+            assertEquals(3, generated.size, "Missing indexes for text format $index")
+            assertTrue(generated.any { it.readText().contains(route) })
+            assertEquals(content, kotlin.readText())
+        }
+    }
+
+    @Test
     fun kotlinBusinessClassComparisonSkipsEquivalentAliasesAndDefaultsAfterRealCompilation() {
         val executions = installCountingProcessor()
         val java = source
@@ -1261,7 +1279,7 @@ class ARouterJuggAptProcessorTest {
     }
 
     @Test
-    fun ambiguousSameSourceFileAcrossPackagesWarnsInsteadOfInventingAnEmptyOldInput() {
+    fun ambiguousSameSourceFileAcrossPackagesSkipsInsteadOfInventingAnEmptyOldInput() {
         File(source.baseDir, "other/Screen.java").apply {
             parentFile.mkdirs()
             writeText("package other; @com.alibaba.android.arouter.facade.annotation.Route(path=\"/demo/other\") public class Screen extends android.app.Activity {}")
@@ -1272,10 +1290,7 @@ class ARouterJuggAptProcessorTest {
         assertTrue(source.file.renameTo(moved))
         moved.writeText(moved.readText().replace("package demo;", "package third;"))
         source = source.copy(file = moved)
-        val logger = org.mockito.kotlin.spy(context.logger)
-        whenever(context.logger).thenReturn(logger)
         assertTrue(generate().isEmpty())
-        org.mockito.kotlin.verify(logger).warn(org.mockito.kotlin.argThat<String> { contains("Ambiguous SourceFile") }, any<Throwable>())
     }
 
     @Test

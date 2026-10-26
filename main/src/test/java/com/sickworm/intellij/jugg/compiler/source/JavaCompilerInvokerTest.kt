@@ -12,11 +12,16 @@ import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import org.mockito.Mockito.mockStatic
 import org.mockito.kotlin.any
+import org.mockito.kotlin.doThrow
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.whenever
 import java.io.File
 import java.nio.ByteBuffer
+import java.nio.file.FileSystem
+import java.nio.file.Path
+import java.nio.file.spi.FileSystemProvider
 import javax.tools.ToolProvider
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -61,6 +66,58 @@ class JavaCompilerInvokerTest {
     fun `Java 17 compilation resolves wildcard imported Module`() {
         assumeTrue(Runtime.version().feature() >= 17)
         assertModuleCompilation(compile(moduleSources, "17"), 61)
+    }
+
+    @Test
+    fun `Android compilation bypasses unrelated file system providers`() {
+        val providers = FileSystemProvider.installedProviders()
+        val unrelatedProvider = mock<FileSystemProvider>()
+        val unrelatedFileSystem = mock<FileSystem>()
+        whenever(unrelatedProvider.scheme).thenReturn("file")
+        whenever(unrelatedProvider.newFileSystem(any<Path>(), any())).thenReturn(unrelatedFileSystem)
+        whenever(unrelatedFileSystem.getPath("/")).thenReturn(temporaryFolder.newFolder().toPath())
+        mockStatic(FileSystemProvider::class.java).use { mocked ->
+            mocked.`when`<List<FileSystemProvider>> { FileSystemProvider.installedProviders() }
+                .thenReturn(listOf(unrelatedProvider) + providers)
+            assertModuleCompilation(compile(moduleSources, "11"), 55)
+        }
+    }
+
+    @Test
+    fun `platform isolation failure retains normal Java compilation`() {
+        val platformDir = temporaryFolder.newFolder("broken-platform")
+        val platformJar = androidJar.copyTo(File(platformDir, "android.jar"))
+        File(platformDir, "core-for-system-modules.jar").writeText("invalid ZIP")
+        val sources = mapOf("Use.java" to "public class Use extends android.app.Activity { String value; }")
+        assertModuleCompilation(compile(sources, "11", platformJar = platformJar), 55)
+        val invalidSources = mapOf("Use.java" to "public class Use { MissingType value; }")
+        val failure = compile(invalidSources, "11", platformJar = platformJar)
+        assertFalse(failure.isAllSuccess)
+        assertTrue(failure.failedFiles.single().getFailure().errorMessages.contains("MissingType"))
+        assertTrue(failure.outputs.isEmpty())
+    }
+
+    @Test
+    fun `platform cleanup failure retains successful Java output`() {
+        val zipProvider = FileSystemProvider.installedProviders().first { it.scheme == "jar" }
+        val platformJar = File(androidJar.parentFile, "core-for-system-modules.jar")
+        zipProvider.newFileSystem(platformJar.toPath(), emptyMap<String, Any>()).use { actualFileSystem ->
+            val provider = mock<FileSystemProvider>()
+            val fileSystem = mock<FileSystem>()
+            whenever(provider.scheme).thenReturn("jar")
+            whenever(provider.newFileSystem(any<Path>(), any())).thenAnswer { call ->
+                val path = call.getArgument<Path>(0)
+                if (path == platformJar.toPath()) fileSystem
+                else zipProvider.newFileSystem(path, call.getArgument<Map<String, Any>>(1))
+            }
+            whenever(fileSystem.getPath("/")).thenReturn(actualFileSystem.getPath("/"))
+            doThrow(UnsupportedOperationException("close failed")).whenever(fileSystem).close()
+            mockStatic(FileSystemProvider::class.java).use { mocked ->
+                mocked.`when`<List<FileSystemProvider>> { FileSystemProvider.installedProviders() }
+                    .thenReturn(listOf(provider))
+                assertModuleCompilation(compile(moduleSources, "11"), 55)
+            }
+        }
     }
 
     @Test

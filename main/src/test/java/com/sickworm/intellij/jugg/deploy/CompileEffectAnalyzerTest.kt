@@ -15,6 +15,7 @@ import com.sickworm.intellij.jugg.deploy.run.JuggDeployData
 import com.sickworm.intellij.jugg.project.ChangedFile
 import com.sickworm.intellij.jugg.project.JuggPathManager
 import com.sickworm.intellij.jugg.project.data.ModuleInfo
+import com.sickworm.intellij.jugg.project.data.LibraryDependency
 import com.sickworm.intellij.jugg.mock.AssembleAndroidProjectOnce
 import com.sickworm.intellij.jugg.mock.TestGlobal
 import org.junit.Rule
@@ -26,6 +27,8 @@ import org.mockito.kotlin.mock
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import java.io.File
+import java.util.jar.JarEntry
+import java.util.jar.JarOutputStream
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -33,6 +36,38 @@ class CompileEffectAnalyzerTest {
 
     @get:Rule
     val temporaryFolder = TemporaryFolder()
+
+    @Test
+    fun `desugar dependency extraction keeps classes in a dedicated temporary directory`() {
+        val projectDir = temporaryFolder.newFolder("dependency-extraction")
+        val pathManager = JuggPathManager(projectDir)
+        val classPath = "com/sickworm/intellij/jugg/deploy/ClassFileLookupHelper.class"
+        val classBytes = javaClass.getResourceAsStream("/$classPath")!!.use { it.readBytes() }
+        val dependencyJar = File(projectDir, "dependency.jar")
+        JarOutputStream(dependencyJar.outputStream()).use {
+            it.putNextEntry(JarEntry(classPath))
+            it.write(classBytes)
+            it.closeEntry()
+        }
+        val module = ModuleInfo.virtualModule.copy(
+            libraryDependencies = listOf(LibraryDependency("dependency", dependencyJar)),
+        )
+        val generator = mock<DeployDataGenerator>()
+        whenever(generator.getDesugarInfo(any(), any())).thenReturn(
+            DesugarInfo(listOf("Lcom/sickworm/intellij/jugg/deploy/ClassFileLookupHelper;"), emptyMap(), false, null),
+        )
+        val analyzer = CompileEffectAnalyzer(pathManager, generator, mock(), mock())
+        val outputDir = temporaryFolder.newFolder("dependency-classpath")
+
+        analyzer.getDesugarInfo(
+            ClassPreparation(emptyList()), module, mapOf(module.name to module), outputDir, File(projectDir, "base.apk"),
+        )
+
+        assertTrue(File(pathManager.tmpDir, "extracted_classes/$classPath").readBytes().contentEquals(classBytes))
+        assertTrue(File(outputDir, classPath).readBytes().contentEquals(classBytes))
+        assertFalse(File(pathManager.tmpDir, classPath).exists())
+        assertTrue(dependencyJar.isFile)
+    }
 
     @Test
     fun `isBootClasspathClass returns true for java stdlib classes`() {

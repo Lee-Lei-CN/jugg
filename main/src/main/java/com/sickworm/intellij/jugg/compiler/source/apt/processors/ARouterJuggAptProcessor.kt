@@ -32,7 +32,7 @@ class ARouterJuggAptProcessor : BaseJuggAptProcessor() {
         val prepared = try {
             prepare(context, module, currentFiles, checkpoint, analysis) ?: return emptyList()
         } catch (failure: Throwable) {
-            warnSkipped(context, module, currentFiles.map { it.file }, failure)
+            logSkipped(context, module, currentFiles.map { it.file }, failure)
             return emptyList()
         }
         try {
@@ -61,7 +61,7 @@ class ARouterJuggAptProcessor : BaseJuggAptProcessor() {
             }
         }
         if (failures.isNotEmpty()) {
-            failures.forEach { (file, failure) -> warnSkipped(context, module, listOf(file), failure) }
+            failures.forEach { (file, failure) -> logSkipped(context, module, listOf(file), failure) }
             return null
         }
         if (!changed) {
@@ -78,7 +78,7 @@ class ARouterJuggAptProcessor : BaseJuggAptProcessor() {
             try { semantics.current(source) } catch (failure: Throwable) { failures += source to failure }
         }
         if (failures.isNotEmpty()) {
-            failures.forEach { (file, failure) -> warnSkipped(context, module, listOf(file), failure) }
+            failures.forEach { (file, failure) -> logSkipped(context, module, listOf(file), failure) }
             return null
         }
         val ownedSources = checkpoint.sourceRoot.exists()
@@ -150,8 +150,8 @@ class ARouterJuggAptProcessor : BaseJuggAptProcessor() {
         return listOfNotNull(pkg, file.nameWithoutExtension).joinToString(".")
     }
 
-    private fun warnSkipped(context: ICompileContext, module: ModuleInfo, files: List<File>, failure: Throwable) {
-        context.logger.warn("ARouter detection failed for ${module.name}, files=$files: ${failure.message}; " +
+    private fun logSkipped(context: ICompileContext, module: ModuleInfo, files: List<File>, failure: Throwable) {
+        context.logger.debug("ARouter detection failed for ${module.name}, files=$files: ${failure.message}; " +
                 "generation skipped for this module round; indexes may be stale; run a full Gradle build to restore consistency", failure)
     }
 

@@ -9,9 +9,8 @@ import com.sickworm.intellij.jugg.ide.bean.JuggSettings
 import com.sickworm.intellij.jugg.project.JuggException
 import com.sickworm.intellij.jugg.project.data.ModuleInfo
 import java.io.File
-import java.io.IOException
 import java.nio.file.FileSystem
-import java.nio.file.FileSystems
+import java.nio.file.spi.FileSystemProvider
 import javax.tools.*
 import javax.tools.JavaCompiler
 
@@ -50,8 +49,8 @@ class JavaCompilerInvoker {
     ): CompileResult {
         logger.debug("compile options: $options")
 
-        val fileManager = compiler.getStandardFileManager(null, null, null)
-        val compileItems = task.files.map {
+        var fileManager = compiler.getStandardFileManager(null, null, null)
+        var compileItems = task.files.map {
             val fileObject = fileManager.getJavaFileObjectsFromFiles(listOf(it.file)).first()
             JavaCompileItem(it, fileObject)
         }
@@ -160,64 +159,63 @@ class JavaCompilerInvoker {
         }
 
         // compile files
-        val objects = compileItems.map { it.fileObject }
-
         val platformFileSystems = mutableListOf<FileSystem>()
         val isSuccess = try {
             val androidJar = dependencies.firstOrNull { File(it).name == "android.jar" }
                 ?.takeUnless { module.moduleType == ModuleInfo.Type.JavaLibrary }
             if (androidJar != null) {
                 val isModularSource = (sourceVersion.removePrefix("1.").toIntOrNull() ?: 8) >= 9
-                val frameworkJars = dependencies.take(dependencies.indexOf(androidJar)).map(::File)
-                val sdkPlatformJars = getAndroidPlatformJars(context, module, File(androidJar), isModularSource, logger)
-                val platformJars = if (isModularSource && sdkPlatformJars.any { it.path == androidJar }) {
-                    frameworkJars + sdkPlatformJars
-                } else {
-                    sdkPlatformJars
-                }
                 // Android does not provide StringConcatFactory; match AGP's StringBuilder concatenation.
                 cmdOptions.add("-XDstringConcat=inline")
-                if (isModularSource) {
-                    // With no JDK modules, javac still needs java.base supplied by the Android API.
-                    cmdOptions.addAll(listOf("--system", "none"))
-                    val platformPaths = platformJars.map { file ->
-                        if (file.isDirectory) {
-                            file.toPath()
-                        } else {
-                            val fileSystem = FileSystems.newFileSystem(file.toPath(), null as ClassLoader?)
-                            platformFileSystems.add(fileSystem)
-                            fileSystem.getPath("/")
-                        }
+                try {
+                    val frameworkJars = dependencies.take(dependencies.indexOf(androidJar)).map(::File)
+                    val sdkPlatformJars = getAndroidPlatformJars(context, module, File(androidJar), isModularSource, logger)
+                    val platformJars = if (isModularSource && sdkPlatformJars.any { it.path == androidJar }) {
+                        frameworkJars + sdkPlatformJars
+                    } else {
+                        sdkPlatformJars
                     }
-                    fileManager.setLocationForModule(StandardLocation.MODULE_PATH, "java.base", platformPaths)
-                    logger.debug("Java platform java.base: $platformJars")
-                } else {
-                    // Source 8 has no modules; the file-manager API also supports a newer bytecode target.
-                    fileManager.setLocation(StandardLocation.PLATFORM_CLASS_PATH, frameworkJars + platformJars)
-                    logger.debug("Java platform boot classpath: ${frameworkJars + platformJars}")
+                    if (isModularSource) {
+                        val platformPaths = platformJars.map { file ->
+                            if (file.isDirectory) {
+                                file.toPath()
+                            } else {
+                                // Bypass IDE providers that return the host file system for arbitrary paths.
+                                val fileSystem = FileSystemProvider.installedProviders().first { it.scheme == "jar" }
+                                    .newFileSystem(file.toPath(), emptyMap<String, Any>())
+                                platformFileSystems.add(fileSystem)
+                                fileSystem.getPath("/")
+                            }
+                        }
+                        fileManager.setLocationForModule(StandardLocation.MODULE_PATH, "java.base", platformPaths)
+                        logger.debug("Java platform java.base: $platformJars")
+                        // Disable host modules only after the Android platform is ready.
+                        cmdOptions.addAll(listOf("--system", "none"))
+                    } else {
+                        // Source 8 has no modules; the file-manager API also supports a newer bytecode target.
+                        fileManager.setLocation(StandardLocation.PLATFORM_CLASS_PATH, frameworkJars + platformJars)
+                        logger.debug("Java platform boot classpath: ${frameworkJars + platformJars}")
+                    }
+                } catch (e: Exception) {
+                    logger.warn("Android Java platform isolation failed; " +
+                            "using host JDK platform classes for this compilation", e)
+                    closeCompilerResources(fileManager, platformFileSystems, logger)
+                    fileManager = compiler.getStandardFileManager(null, null, null)
+                    compileItems = task.files.map {
+                        JavaCompileItem(it, fileManager.getJavaFileObjectsFromFiles(listOf(it.file)).first())
+                    }
                 }
             }
             logCompileCommand(module, cmdOptions, compileItems, logger)
             val javaTask = try {
-                compiler.getTask(null, fileManager, compileListener, cmdOptions, null, objects)
+                compiler.getTask(null, fileManager, compileListener, cmdOptions, null, compileItems.map { it.fileObject })
             } catch (e: Exception) {
                 logger.warn("getTask failed", e)
                 null
             }
             javaTask?.call() ?: false
         } finally {
-            try {
-                fileManager.close()
-            } catch (e: IOException) {
-                logger.warn("Close javac file manager failed", e)
-            }
-            platformFileSystems.asReversed().forEach {
-                try {
-                    it.close()
-                } catch (e: IOException) {
-                    logger.warn("Close Android platform file system failed: $it", e)
-                }
-            }
+            closeCompilerResources(fileManager, platformFileSystems, logger)
         }
 
         // all failed or all success
@@ -315,6 +313,26 @@ class JavaCompilerInvoker {
                 emptyList(),
             )
         }
+    }
+
+    private fun closeCompilerResources(
+        fileManager: StandardJavaFileManager,
+        platformFileSystems: MutableList<FileSystem>,
+        logger: Logger,
+    ) {
+        try {
+            fileManager.close()
+        } catch (e: Exception) {
+            logger.warn("Close javac file manager failed", e)
+        }
+        platformFileSystems.asReversed().forEach {
+            try {
+                it.close()
+            } catch (e: Exception) {
+                logger.warn("Close Android platform file system failed: $it", e)
+            }
+        }
+        platformFileSystems.clear()
     }
 
     /** Selects Android platform classes and the compiler-only lambda stubs used by AGP. */

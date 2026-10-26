@@ -20,7 +20,7 @@ Jugg 只对少量明确列出的注解入口提供内置增量处理，并把对
 |---|---|---|
 | 新增 `com.tencent.kuikly.core.annotations.Page` / `@Page` 页面 | 支持 | 基于已有路由入口补充缺失注册，并将更新后的入口加入本轮源码编译 |
 | 删除、重命名或修改已有 Kuikly `@Page` 路由 | 不支持 | 不移除旧路由注册，需要由 Gradle 重新生成完整入口 |
-| ARouter `@Route` / `@Autowired` / `@Interceptor` | 支持 | 本轮相关输入与业务 class 不同时运行项目处理器，支持项目 APT/KAPT 和 KSP1/KSP2，生成 Java/Kotlin 参与编译；检测失败仅 warn 并跳过，真实生成失败或生成类消失时停止 |
+| ARouter `@Route` / `@Autowired` / `@Interceptor` | 支持 | 本轮相关输入与业务 class 不同时运行项目处理器，支持项目 APT/KAPT 和 KSP1/KSP2，生成 Java/Kotlin 参与编译；检测失败仅记录 debug 日志并跳过，真实生成失败或生成类消失时停止 |
 | 使用 KSP1 的 `com.squareup.moshi.JsonClass` / `@JsonClass` | 支持 | 通过项目 KSP1 compiler plugin 生成 Moshi adapter，并继续源码编译 |
 | 使用 KSP2 的 `com.squareup.moshi.JsonClass` / `@JsonClass` | 不支持 | 不独立运行 KSP2 processor，只能继续编译 Gradle 已生成的源码 |
 | [DataBinding `<layout>`](./databinding-viewbinding.md) | 支持 | 通过专用 DataBinding annotation processor 生成 mapper、BR 和绑定相关源码 |
