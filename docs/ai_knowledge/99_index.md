@@ -1,6 +1,6 @@
 # AI 使用指引（任务路由版）
 
-> 最后核对：2026-09-27
+> 最后核对：2026-10-27
 > 一致性规则：文档与代码冲突时，以代码为准。
 
 ---
@@ -27,6 +27,7 @@
 | 任务类型 | 最小必读文档 | 代码入口（示例） |
 |----------|--------------|------------------|
 | **测试与验证策略 / TDD / 新增 testcase** | `06_testing.md` | `main/.../DeployDataGeneratorTest.kt`, `idea/.../manager/TopLevelFlowTest`, `idea/.../deploy/run/DeployCompatArchitectureTest.kt` |
+| GitHub Release 说明 / 跨内部版本 changelog 汇总 | `98_code_map.md` §3「GitHub Release 发布说明」、`06_testing.md` | `.github/workflows/release.yml`、`tools/generate_release_notes.rb`、`tools/test_generate_release_notes.py` |
 | **app androidTest 支持 / instrumentation 运行链路** | `06_android_test.md`, `06_testing.md` | `JuggAndroidTestRunConfiguration.kt`, `JuggAndroidTestLineMarkerContributor.kt`, `JuggAndroidTestConsoleProperties.kt`, `JuggAndroidTestRerunFailedTestsAction.kt`, `InstrumentationSmRunnerBridge.kt`, `TestLauncher.kt` |
 | 整体架构理解/模块划分 | `98_code_map.md`, `01_architecture.md` | - |
 | 编译失败/回退策略 | `98_code_map.md`, `02_compile_core.md`, `02_compile_source.md` | `idea/.../JuggCompileHelper.kt`, `main/.../JuggCompiler.kt` |
