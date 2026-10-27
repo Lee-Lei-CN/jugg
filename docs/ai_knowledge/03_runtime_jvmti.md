@@ -34,6 +34,7 @@
 | `InstrumentationHooks` | `jvmti_agent/src/main/java/com/sickworm/intellij/jugg/instrument/InstrumentationHooks.java` | 处理 ResourcesManager、ClassLoader resource 等 framework hook；compat deploy 启用后必须跳过普通 Apply Changes overlay 修正；startup hook 在 dex fix 之后前置已提交 `code_cache/.overlay/<apkName>/lib/<abi>`（旧 `.jugg_native` 低优先级兼容） |
 | `NativeLibraryPathInstaller` | `jvmti_agent/src/main/java/com/sickworm/intellij/jugg/hotfix/NativeLibraryPathInstaller.java` | 冷启动按进程 ABI 与 base/split 顺序把已提交 `.overlay/<apkName>/lib/<abi>` 目录前置进 `DexPathList.nativeLibraryDirectories`，供 `System.loadLibrary` / `findLibrary` 命中补丁 `.so` |
 | `ApplyChangesOverlayPolicy` | `jvmti_agent/src/main/java/com/sickworm/intellij/jugg/instrument/ApplyChangesOverlayPolicy.java` | 记录宿主 APK 路径，判断非宿主资源环境是否需要移除 Apply Changes overlay |
+| `RuntimeSharedLibraries` | `jvmti_agent/src/main/java/com/sickworm/intellij/jugg/instrument/RuntimeSharedLibraries.java` | 保留宿主运行中成功追加的 shared-library 路径，在 AssetManager 重建返回前按原顺序补齐 |
 | `ResourceOverlays` | `jvmti_agent/src/main/java/com/sickworm/intellij/jugg/instrument/ResourceOverlays.java` | 将展开 APK 目录中的资源和 assets 接入 Android 11+ ResourcesLoader；限 Direct sandbox 标记和宿主 APK，兼容部署沿用资源 APK |
 | `FlutterAssetRefresh` | `jvmti_agent/src/main/java/com/sickworm/intellij/jugg/instrument/FlutterAssetRefresh.java` | 让 FlutterEngine 使用 overlay-aware AssetManager：已启动 Dart 的 Engine 走 `updateJavaAssetManager()`，未启动的替换 `DartExecutor.assetManager`，宿主包上下文在 `ContextImpl#createPackageContext` exit 补齐 overlay loader；失败按批 warn + Toast |
 | `HotfixLoader` | `jvmti_agent/src/main/java/com/sickworm/intellij/jugg/hotfix/HotfixLoader.java` | 初始化 app code cache 路径，识别 compat flag，安装 dex/resource patch，并在 `install()` 末尾幂等注入 native 搜索路径 |
@@ -199,6 +200,16 @@ Jugg 在 `ResourcesManager#createAssetManager` 的新旧签名中记录当前 `R
 ```
 
 宿主 APK 路径尚未记录时，策略退回到旧的 `/data/app` 路径判断。该修正只处理非宿主资源环境，不能删除宿主 Activity 正常热更新所需的 overlay。startup agent 在 compat deploy flag 存在时不会执行任何 framework transform；Java hook 仍保留 compat 判断，以兼容已生成的历史 transform cache。
+
+宿主资源还需要保留运行中动态追加的 shared libraries。部分系统的 WebViewFactory 使用 `AssetManager.addAssetPathAsSharedLibrary()` 追加 WebView/Trichrome APK；这只修改当前实例，未同步进入宿主 `ResourcesKey.mLibDirs`。Android Studio overlay loader 的 `setProviders()` 可触发 `ResourcesManager.onLoaderUpdated()` 按旧 key 重建实例，从而丢失这些路径。Issue #72 的 OPPO Android 16 现场已记录同一 Resources 的实例替换及路径丢失，随后出现 ICU invalid fd。
+
+`RuntimeSharedLibraries` 在 Android 11+ 的 shared-library 原调用正常返回正 cookie 后，只记录包含宿主 `ApplicationInfo.sourceDir` 的 AssetManager 所接受的路径。不能使用整个 `getAllApkPaths()` 判断此处的宿主归属，因为其中的系统 shared libraries / RRO 会与其它包共用。进程内按首次加入顺序去重保存路径；宿主 `createAssetManager*` 返回前仅补齐缺失项，继续调用原 shared-library API，保留 framework 的 shared-library 标志，插入位置由 framework 决定，不额外重应用 loader 或调整资源列表顺序。未记录动态路径或路径已存在时直接跳过；非宿主 overlay 修正和 compat 路径保持原分支。恢复失败逐项 warn 并继续其余路径，原返回对象不变。
+
+共享库与宿主 overlay 存在同路径 asset 时，当前 Apply Changes/ResourcesLoader 机制可能使增量部署与完整 Gradle 构建的命中结果不同，也可能随系统实现、首次登记、资源重建和重启时序变化。当前接受这项兼容性限制，不将“overlay 始终优先”作为正确性目标；共享库恢复只负责路径可用性。该结论针对按路径查找的 asset，不能据此推断 `res/` 的资源 ID 解析行为。
+
+agent 1.0.88 已移除 Issue #72 调查期间的 `ResourceDiagnostics`、全量资源/调用栈快照、ICU ZIP 扫描及七个诊断专用 framework hook，只保留路径登记与恢复所需的 `addAssetPathAsSharedLibrary` enter/exit hook。正常登记不打印日志；成功恢复的 `Restored runtime shared library` 使用既有 `LogUtils.d`，默认关闭，通过进程启动前存在的 `/data/local/tmp/jugg/log_debug` 标记启用。登记、检查或恢复失败仍逐项 warn，不受 debug 开关影响。
+
+验收应对照资源重建后的路径完整性、ICU 数据读取/映射及资源增量显示；1.0.87 调查版的历史快照与 OPPO 修复核验保存在任务方案引用的现场目录，不能要求 1.0.88 继续输出已移除的诊断事件。不同设备仍需比较资源注册分支、loader 更新行为和 WebView 初始化顺序；OPPO 本轮资源及 ICU 核验正常，两台正常设备的实际差异仍待交叉验证。
 
 ### 4.6 Direct sandbox 普通资源 overlay
 

@@ -203,9 +203,12 @@ public class InstrumentationHooks {
         }
         if (isNeedFix) {
             tryFixOutSideApk(assetManager);
-        } else if (FlutterAssetRefresh.shouldScheduleRefresh()) {
-            // The host AssetManager is recreated by Apply Changes; running Flutter engines need it.
-            FlutterAssetRefresh.scheduleRefresh();
+        } else {
+            RuntimeSharedLibraries.restore(assetManager);
+            if (FlutterAssetRefresh.shouldScheduleRefresh()) {
+                // The host AssetManager is recreated by Apply Changes; running Flutter engines need it.
+                FlutterAssetRefresh.scheduleRefresh();
+            }
         }
         return assetManager;
     }
@@ -229,6 +232,7 @@ public class InstrumentationHooks {
             return assetManager;
         }
         if (!isNeedFix) {
+            RuntimeSharedLibraries.restore(assetManager);
             // The host AssetManager is recreated by Apply Changes; running Flutter engines need it.
             if (FlutterAssetRefresh.shouldScheduleRefresh()) {
                 FlutterAssetRefresh.scheduleRefresh();
@@ -303,6 +307,15 @@ public class InstrumentationHooks {
         } catch (Throwable e) {
             LogUtils.e(TAG, "tryFixOutSideApk failed", e);
         }
+    }
+
+    public static void resourceSharedLibraryEnter(AssetManager manager, String path) {
+        RuntimeSharedLibraries.beforeAdd(manager, path);
+    }
+
+    public static int resourceSharedLibraryExit(int cookie) {
+        RuntimeSharedLibraries.afterAdd(cookie);
+        return cookie;
     }
 
     /**
