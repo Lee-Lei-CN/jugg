@@ -1034,10 +1034,8 @@ class RemoteGradleCompileClient(
             val remoteCheck = remoteInvoke(SimpleSshCommand("case \"\$(uname -s)\" in Linux|Darwin) true;; *) false;; esac",
                 outputFilter = { line, _ -> line.trim() != "(Jugg) SimpleSshCommand result: 0" }), NO_OUTPUT_TIMEOUT_MS)
             if (remoteCheck != 0) return remoteCheck
-            cmdExecutor.prepareForInvoke()
-            if (isCanceled) cmdExecutor.release()
-            val arguments = runtime.arguments(command)
-            val environment = runtime.environment(command)
+            val (arguments, environment) = prepareWindowsRsync(runtime, command)
+                ?: return IGradleCompileClient.Error.ERROR_CANCELED
             cmdExecutor.prepareForInvoke()
             if (isCanceled) cmdExecutor.release()
             val output = mutableListOf<String>()
@@ -1059,6 +1057,41 @@ class RemoteGradleCompileClient(
             logger.warn("Windows rsync configuration or runtime failed", exception)
         }
         return if (isCanceled) IGradleCompileClient.Error.ERROR_CANCELED else IGradleCompileClient.Error.ERROR_FAILED
+    }
+
+    private fun prepareWindowsRsync(
+        runtime: WindowsRsyncRuntime,
+        command: RsyncCommand,
+    ): Pair<List<String>, Map<String, String>>? {
+        for (attempt in 0..1) {
+            if (isCanceled) return null
+            cmdExecutor.prepareForInvoke()
+            if (isCanceled) cmdExecutor.release()
+            try {
+                return runtime.arguments(command) to runtime.environment(command)
+            } catch (exception: WindowsRsyncSetupException) {
+                if (isCanceled) return null
+                if (attempt == 1 || exception.category != "path_conversion_failed" ||
+                    exception.exitCode != -1073741757) throw exception
+                logger.warn("Cygwin path conversion failed with STATUS_SHARING_VIOLATION (0xC0000043); " +
+                        "retrying preparation once after 3 seconds")
+                if (!waitForWindowsRsyncRetry()) return null
+            }
+        }
+        return null
+    }
+
+    private fun waitForWindowsRsyncRetry(): Boolean {
+        try {
+            repeat(30) {
+                if (isCanceled) return false
+                Thread.sleep(100)
+            }
+        } catch (exception: InterruptedException) {
+            Thread.currentThread().interrupt()
+            throw exception
+        }
+        return !isCanceled
     }
 
     private fun quoteRemotePath(path: String): String = "'${path.replace("'", "'\"'\"'")}'"

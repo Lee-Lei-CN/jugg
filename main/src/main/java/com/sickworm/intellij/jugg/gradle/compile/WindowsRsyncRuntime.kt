@@ -53,7 +53,7 @@ internal class WindowsRsyncRuntime private constructor(
             throw WindowsRsyncSetupException("tool_start_failed", executable("cygpath"), safeReason = startFailureReason(exception))
         }
         if (result != 0 || output.size != 1 || !output.single().startsWith('/')) {
-            throw WindowsRsyncSetupException("path_conversion_failed", executable("cygpath"), safeReason = "Exit code: $result; invalid conversion result")
+            throw WindowsRsyncSetupException("path_conversion_failed", executable("cygpath"), safeReason = "Exit code: $result; invalid conversion result", exitCode = result)
         }
         return output.single()
     }

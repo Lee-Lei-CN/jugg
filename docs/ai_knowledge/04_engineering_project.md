@@ -214,6 +214,8 @@ Library androidTest 的 `instrumentationTargetPackage` 当前取 synthetic test 
 
 Windows x64 本地 NTFS 到 Linux/macOS 使用 `WindowsRsyncRuntime` 的原生 argv 进程，远端 uname 仅接受 Linux/Darwin，支持 `rsync_simple`、完整 `rsync` 和多工程；Windows 路径在边界转换，classpath 返回实际下载位置。Windows 统一使用本机 Cygwin 的 rsync、ssh 和 cygpath；严格使用 PATH 中第一个 rsync.exe 及同目录 ssh/cygpath，工具缺失或实际启动失败提示具体路径、原因和配置 Prompt 入口，不自动安装。首次版本探测为独立 best-effort 诊断，失败记录后继续实际流程，不额外复测。私钥及密码均沿既有远端连接配置读取；发现的密钥与有效密码并存时，外部 SSH 先尝试公钥，再允许密码或 keyboard-interactive 回退，密码仅通过子进程环境与 askpass 传递。Windows rsync 上传后，在完整构建前为 compileCommand 指定且位于工程内的相对 gradlew 设置 Unix 执行位；依赖变化检测固定执行 `./gradlew --dry-run`，因此在本轮上传后独立准备工程根目录的 wrapper，不依赖配置的完整构建命令。该处理覆盖 Cygwin 读取到的源 wrapper 无执行位、上传覆盖远端权限的条件；仅拉取和非 Windows 路径不变。直接进程保留真实退出码和取消结果；本地 backup classpath 继续关闭。
 
+Windows rsync 参数和环境准备阶段，仅对 cygpath 路径转换的 `STATUS_SHARING_VIOLATION`（`-1073741757`）等待 3 秒重试一次，期间可取消；第二次失败报告最终异常，不重放实际传输。其他错误和 best-effort 版本探测保持原行为。
+
 FindOutputCommand 在只指定 APK 文件名时显式使用 `find .`，兼容 BSD find。
 
 验收复用 `idea/.../gradle/RemoteGradleCompileClientTest`：`testSimulated*ArtifactFetch` 覆盖三种同步布局，真实上传后用 Python 生成所有产物目录的小文件，验证 APK/classpath、原生链接、失败和取消；`testSimulatedCancellation` 验证 JSch shell 取消。`testRealProjectCompileAndFetch` 实际构建 demo 工程，验证首次/无变化/资源修改后的 APK 内容和 classpath，并记录耗时；它不代表设备部署已通过。脱敏小夹具矩阵见 `tools/windows-rsync/windows_rsync_acceptance.py`，真实工程传输计时见 `tools/windows-rsync/windows_rsync_project_benchmark.py`；服务器、JSON 及定向命令见 [测试准备](../task/2026-10/windows_rsync_test_setup.md)。

@@ -1,11 +1,12 @@
 package com.sickworm.intellij.jugg.gradle.compile
 
 /** Contains only local tool diagnostics; never remote authentication or process output. */
-class WindowsRsyncSetupException(
+class WindowsRsyncSetupException @JvmOverloads constructor(
     val category: String,
     val toolPath: String = "",
     val missingTools: List<String> = emptyList(),
     val safeReason: String = "",
+    val exitCode: Int? = null,
 ) : IllegalStateException("Windows rsync setup failed: $category. " +
         "Selected tool: ${toolPath.ifEmpty { "none" }}. " +
         (if (missingTools.isEmpty()) "" else "Missing: ${missingTools.joinToString()}. ") +

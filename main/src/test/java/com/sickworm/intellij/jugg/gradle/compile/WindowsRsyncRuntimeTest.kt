@@ -44,6 +44,22 @@ class WindowsRsyncRuntimeTest {
         assertTrue(runtime.arguments(passwordOnly)[2].contains("PreferredAuthentications=password,keyboard-interactive"))
     }
 
+    @Test
+    fun `path conversion preserves native exit code without retrying internally`() {
+        assumeTrue(isWindows)
+        val bin = folder.newFolder("conversion tools")
+        listOf("rsync", "ssh", "cygpath").forEach { File(bin, "$it.exe").writeText("fixture") }
+        val executor = org.mockito.Mockito.mock(CmdExecutor::class.java)
+        org.mockito.kotlin.whenever(executor.invokeProcess(org.mockito.kotlin.any(), org.mockito.kotlin.any(),
+            org.mockito.kotlin.anyOrNull(), org.mockito.kotlin.any())).thenReturn(-1073741757)
+        val runtime = WindowsRsyncRuntime.fromPath(bin.path, executor)
+        val failure = assertThrows(WindowsRsyncSetupException::class.java) { runtime.localPath(folder.root.path) }
+        assertEquals("path_conversion_failed", failure.category)
+        assertEquals(-1073741757, failure.exitCode)
+        org.mockito.Mockito.verify(executor, org.mockito.Mockito.times(1)).invokeProcess(
+            org.mockito.kotlin.any(), org.mockito.kotlin.any(), org.mockito.kotlin.anyOrNull(), org.mockito.kotlin.any())
+    }
+
     private fun load(root: File) = WindowsRsyncRuntime.fromPath(File(root, "bin").path,
         CmdExecutor(org.mockito.Mockito.mock(com.intellij.openapi.diagnostic.Logger::class.java)))
 
