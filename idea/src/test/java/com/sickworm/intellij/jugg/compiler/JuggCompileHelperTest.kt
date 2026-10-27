@@ -86,7 +86,7 @@ class JuggCompileHelperTest {
 
         invokePreprocessIncrementalCompile(fixture.helper, fixture.options, fixture.uiHandler)
 
-        verify(fixture.gitFileChangesDetector).refreshChangedFilesIfHeadChanged()
+        verify(fixture.gitFileChangesDetector).refreshFileChangesIfHeadChanged()
         verify(fixture.gitChangeChecker).checkUndetectedFilesAsync(any())
         verify(fixture.gitChangeChecker, never()).checkUndetectedFiles(any())
     }
@@ -94,7 +94,7 @@ class JuggCompileHelperTest {
     @Test
     fun preprocessIncrementalCompile_gitHeadRefreshFailure_forcesGradleFallback() {
         val fixture = createFixture()
-        whenever(fixture.gitFileChangesDetector.refreshChangedFilesIfHeadChanged())
+        whenever(fixture.gitFileChangesDetector.refreshFileChangesIfHeadChanged())
             .thenReturn(GitFileChangesDetector.GitRefreshResult.FAILED)
 
         val result = invokePreprocessIncrementalCompile(fixture.helper, fixture.options, fixture.uiHandler)
@@ -359,7 +359,7 @@ class JuggCompileHelperTest {
 
         invokePreprocessIncrementalCompile(fixture.helper, fixture.options, fixture.uiHandler)
 
-        verify(fixture.gitFileChangesDetector).refreshChangedFilesIfHeadChanged()
+        verify(fixture.gitFileChangesDetector).refreshFileChangesIfHeadChanged()
         verify(fixture.gitChangeChecker).checkUndetectedFilesAsync(any())
         verify(fixture.gitChangeChecker, never()).checkUndetectedFiles(any())
     }
@@ -1156,7 +1156,7 @@ class JuggCompileHelperTest {
         whenever(deployFileManager.getUncompiledFiles()).thenReturn(emptyList())
         whenever(deployStateManager.updateDeployState()).thenReturn(JuggDeployState.READY)
         whenever(gradleProjectInfoLocalFetchManager.isIncrementalCompileAvailable).thenReturn(true)
-        whenever(gitFileChangesDetector.refreshChangedFilesIfHeadChanged())
+        whenever(gitFileChangesDetector.refreshFileChangesIfHeadChanged())
             .thenReturn(GitFileChangesDetector.GitRefreshResult.NO_HEAD_CHANGE)
 
         val helper = JuggCompilerHelper(
