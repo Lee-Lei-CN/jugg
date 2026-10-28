@@ -1,6 +1,6 @@
 # 编译系统：资源编译链（res/assets/arsc/Compose resource）
 
-> 最后核对：2026-10-21
+> 最后核对：2026-10-28
 > 一致性规则：文档与代码冲突时，以代码为准。
 
 ---
@@ -130,6 +130,7 @@ Compose generated source 路径由 `ModuleBuildPathInfo.composeResourceGenerated
 ## 5. 隐形约束 / 设计思路 / 已知边界
 
 - `ArscCompiler` 为每个 APK 缓存一个 `Aapt2DaemonInvoker`；invoker 死亡或 link 失败会 release，下一轮重新 `loadTable`。
+- library Test APK 与主 APK 都可能没有 split name，不能仅凭 `isBaseApk` 共用资源中间目录。Test APK 的 Manifest、R.java、资源 link 输出及临时资源 APK 按 APK 唯一 key 隔离；`JuggCompiler` 最终收集资源时保留独立物理目录，同时保持部署相对路径与 `apkPath`，避免同名 `AndroidManifest.xml` / `resources.arsc` 相互覆盖。
 - `Aapt2DaemonInvoker` 使用结构化参数列表写入 daemon 协议，每个参数独占一行，APK、资源和输出路径允许包含空格。
 - `loadTable()` 失败时会立即 release invoker 并返回失败，禁止缓存未加载资源表的 daemon，避免后续 inclink 退化为 `no cache data found`。
 - Android res 删除不会让 `resources.arsc` 移除旧 ID，旧资源仍可被读取；只有需要让删除生效时，才通过完整 Gradle build 刷新为新的全量资源表。

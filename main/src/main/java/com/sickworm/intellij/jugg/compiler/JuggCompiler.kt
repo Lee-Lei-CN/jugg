@@ -1,6 +1,7 @@
 package com.sickworm.intellij.jugg.compiler
 
 import com.intellij.openapi.Disposable
+import com.sickworm.intellij.jugg.apk.ApkFileUnit
 import com.sickworm.intellij.jugg.compiler.compose.ComposeResourceCompiler
 import com.sickworm.intellij.jugg.compiler.external.ExternalBuildCompiler
 import com.sickworm.intellij.jugg.compiler.overlay.AssetOverlayCompiler
@@ -193,7 +194,8 @@ class JuggCompiler(
                 val overlays = resourceResult.outputs
                     .filter { it.type == CompileOutput.Type.Res }
                     .map {
-                        val outputFile = it.file.changeBaseDir(it.baseDir, overlayOutputDir)
+                        val apkOutputDir = getResourceOutputDir(overlayOutputDir, it)
+                        val outputFile = it.file.changeBaseDir(it.baseDir, apkOutputDir)
                         outputFile.parentFile.mkdirs()
                         if (outputFile.exists()) {
                             outputFile.delete()
@@ -202,7 +204,7 @@ class JuggCompiler(
                         CompileOutput(
                             CompileOutput.Type.Res,
                             outputFile,
-                            overlayOutputDir,
+                            apkOutputDir,
                             apkPath = it.apkPath,
                             targetApkPaths = it.targetApkPaths,
                         )
@@ -294,7 +296,8 @@ class JuggCompiler(
             val movedOutputs = sourceCompileResult.outputs.map {
                 if (it.type == CompileOutput.Type.Res) {
                     // move from classes output dir to resource output dir
-                    val destFile = it.file.changeBaseDir(it.baseDir, overlayOutputDir)
+                    val apkOutputDir = getResourceOutputDir(overlayOutputDir, it)
+                    val destFile = it.file.changeBaseDir(it.baseDir, apkOutputDir)
                     destFile.parentFile.mkdirs()
                     if (destFile.exists()) {
                         destFile.delete()
@@ -303,7 +306,7 @@ class JuggCompiler(
                     CompileOutput(
                         it.type,
                         destFile,
-                        overlayOutputDir,
+                        apkOutputDir,
                         apkPath = it.apkPath,
                         targetApkPaths = it.targetApkPaths,
                     )
@@ -339,6 +342,14 @@ class JuggCompiler(
 
         checkQuickStop()?.let { return it }
         return compileResult
+    }
+
+    private fun getResourceOutputDir(outputDir: File, output: CompileOutput): File {
+        val apkPath = output.apkPath ?: return outputDir
+        val isTestApk = context.apkInfos.any { info ->
+            info.isTestApk && info.files.any { it.apkFile.path == apkPath }
+        }
+        return if (isTestApk) File(outputDir, ApkFileUnit.getUniqueKey(apkPath)) else outputDir
     }
 
     private fun compileComposeResources(task: CompileTask, files: List<CompileFile>): CompileResult {

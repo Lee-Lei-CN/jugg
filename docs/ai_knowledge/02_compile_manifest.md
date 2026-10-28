@@ -1,6 +1,6 @@
 # 编译系统：Manifest 增量合并
 
-> 最后核对：2026-08-10
+> 最后核对：2026-10-28
 > 一致性规则：文档与代码冲突时，以代码为准。
 
 ---
@@ -28,7 +28,7 @@
 
 | 数据 | 生产者 | 消费者 | 关键约束 |
 |---|---|---|---|
-| 基准 merged manifest | Gradle 上次构建产物，或 Jugg 上轮写入 `tempModule/res/AndroidManifest.xml` | `AndroidManifestCompiler` | Jugg 在最终 merged manifest 上 patch，避免 raw manifest 丢失 variant merge 结果 |
+| 基准 merged manifest | Gradle 上次构建产物，或 Jugg 上轮写入的目标 APK Manifest 缓存 | `AndroidManifestCompiler` | 主 App 沿用 `tempModule/res/AndroidManifest.xml`；library Test APK 使用独立缓存与对应 androidTest module 的完整 Manifest，不能回退到主 App |
 | `ChangedManifestFile` | `AndroidManifestCompiler` | `ManifestDiffer` | application 类 manifest 使用当前目标 APK 的 `applicationId`；library 显式配置同名 placeholder 时保留原值，否则补目标 APK 值；存在 namespace 时补 `JUGG_NAMESPACE_IN_GRADLE` |
 | Manifest diff element | `ManifestDiffer` | `AndroidManifestMerger` | 只携带新增节点和新增/更新属性；删除节点、删除属性和 `tools:node="remove"` 不进入 patch |
 
@@ -39,11 +39,11 @@
 ```text
 ResourceOverlayCompiler.doApkCompile()
   -> 按 APK scoped 任务调用 AndroidManifestCompiler.doApkCompile()
-  -> 选择基准 manifest：优先上轮 Jugg merged manifest，否则用 application module merged manifest
+  -> 选择基准 manifest：优先当前目标 APK 的 Jugg 缓存，否则主 App 用 application module，Test APK 用对应 androidTest module 的完整 Manifest
   -> 为变更 manifest 补当前目标 APK 的 applicationId / namespace placeholder，并为 library manifest 找上次构建相对 manifest
   -> ManifestDiffer.diff() 只提取真实新增/变更节点
   -> AndroidManifestMerger.merge() 将 diff patch 到基准 merged manifest
-  -> 成功后写回 tempModule/res/AndroidManifest.xml，并输出 apkPath 绑定的 CompileOutput.Type.Res
+  -> 成功后写回当前 APK 的独立缓存，并输出 apkPath 绑定的 CompileOutput.Type.Res
 ```
 
 这条链路的关键点是“patch merged manifest”，不是重新跑完整 Gradle manifest merge。标准 `ManifestMerger2` 需要完整 placeholder、variant/flavor manifest、依赖 manifest 和 merge feature 上下文；增量现场不能保证这些输入与上次 Gradle 构建完全一致。Jugg 因此把上次最终 merged manifest 当作稳定基线，只套用能够确定恢复的局部变化。
@@ -55,8 +55,9 @@ Manifest patch 是有意保守的：`ManifestDiffer` 只遍历新 manifest 中�
 ## 5. 隐形约束 / 设计思路 / 已知边界
 
 - Manifest 输出为空是有效结果：library manifest 未变更、diff 后无变化时不会输出 `AndroidManifest.xml`，避免触发无意义 APK repackage。
-- `AndroidManifestCompiler` 会把成功合并结果复制回 `tempModule/res/AndroidManifest.xml`；后续 manifest 增量以这个文件优先作为基准，不能只看 Gradle merged manifest。
-- `ModuleBuildPathInfo.mergedManifest` 会在 `merged_manifests` / `merged_manifest` 候选里优先选取最新的 `AndroidManifest.xml`，避免 AGP 升级后旧目录产物遮蔽新目录产物。
+- `AndroidManifestCompiler` 会把成功合并结果复制回目标 APK 的缓存；主 App 保留 `tempModule/res/AndroidManifest.xml`，Test APK 按 APK 唯一 key 隔离。后续增量优先使用对应缓存，不能只看 Gradle merged manifest。
+- 普通 library main Manifest 仍按 APK 归属分别 patch 到主 APK 与 self-targeting library Test APK；App main Manifest 不会因此进入 library Test APK。两份输出保留各自 package、application 配置和 instrumentation。
+- `ModuleBuildPathInfo.mergedManifest` 在既有 merged manifest 候选中选择最新文件；androidTest variant 还包含 `packaged_manifests/<variant>` 并同步到远端构建基线缓存。测试基线缺失时明确失败并提示完整 Gradle 构建，禁止使用主 App Manifest 顶替。
 - library manifest 会先和 `oldManifest` 做 CRC 比较；未变化直接跳过，避免对依赖库 manifest 做重复 patch。
 - Manifest merge 会忽略 `tools:*` 属性、manifest `package` 和 application `android:name` 更新；这不是漏合并，而是为了避免增量 patch 覆盖运行时关键身份。
 - 删除节点、删除属性和 `tools:node="remove"` 被故意忽略。增量路径只做可确定的新增/更新，避免错误删除最终 merged manifest 中由其他 source set 或依赖贡献的声明。

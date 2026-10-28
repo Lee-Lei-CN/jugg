@@ -1,6 +1,6 @@
 # 工程化：项目模型与 Gradle 集成
 
-> 最后核对：2026-10-14
+> 最后核对：2026-10-28
 > 一致性规则：文档与代码冲突时，以代码为准。
 
 ---
@@ -101,6 +101,8 @@ project info 的 `sourceDirs` 可以保留 build directory 下的 generated sour
 `compile_context.db/module_builds.json` writer 保持 version 2，reader 接受 version 1 和 2。version 1 缺失 `buildDirRelativePath` 时按空字符串恢复，因此仍保留 `complete_flag` 的旧用户无需重新全量构建；正常 version 2 的默认或自定义路径原样保留，损坏 version 2 缺失该字段时也按传统目录恢复。`complete_flag` 已缺失时不自动修复，仍需一次成功的 Jugg 全量构建重建上下文。
 
 androidTest synthetic module 命名为 `${module.name}.androidTest`，`buildVariant` 固定为 `debugAndroidTest`，并通过 `instrumentationTargetPackage` 标记为测试模块。IDE project info 创建时会使用 `AsDeployerCompat#getIdeModuleInfo` 暴露的 IDE Android 模型 test package / target package 信息；Chipmunk / Narwhal feature / Otter / Panda 继承链在 library self-targeting 场景下会 fallback 到 `selectedBasicVariant.testApplicationId`、`androidProject.testNamespace` 或 `${androidProject.namespace}.test`。只有 test package 与 target package 都有效时才把 IDE `.androidTest` module 标记为 androidTest module；`uninitialized.application.id` 会视为无效。若已有 Gradle project info，IDE 侧 `.androidTest` synthetic module 还必须出现在 Gradle androidTest module 集合中；若没有 Gradle 快照，则退化为要求 source root 下存在 Java/Kotlin 源码。Gradle merge 时这些 test 字段仍以 Gradle 非空值优先，并会丢弃 IDE-only androidTest module。
+
+androidTest variant 的完整 Manifest 可能仅位于 `intermediates/packaged_manifests/<variant>/process<Variant>Manifest/AndroidManifest.xml`。`ModuleBuildPathInfo` 将该目录纳入测试 variant 的 Manifest 候选与 `allBuildPaths`，确保远端完整构建后保留测试 APK 自己的增量基线；普通 variant 的 Manifest 候选保持不变。library main Manifest 同时作用于主 App 和 self-targeting Test APK 时，两边分别读取各自基线，不能把主 App 的 application 资源引用带入 Test APK。
 
 ---
 
