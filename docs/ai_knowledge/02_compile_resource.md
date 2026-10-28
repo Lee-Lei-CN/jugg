@@ -91,6 +91,7 @@ Jugg 不回读所有历史 `.flat`，而是直接从 APK 加载最终 `resources
 APK 基线还缺两类旁路信息：
 
 - `resources.arsc` 不保存 `styleable` 聚合声明。`StyleableFileGenerator` 会从目标 APK 相关模块的 R.jar 或 Java classpath 中读取 `R$styleable`，合并后通过 `--styleables` 补给 `inclink --load`。
+- Test APK 的 styleable 从与目标 applicationId 匹配的 androidTest module 的 aggregate R.jar 读取，不能因没有 split name 而复用主 App 模块；找不到测试模块时局部跳过该辅助输入。无 R.jar 时读取所选模块的 Java classpath，优先用模块 `namespace` 定位 R.class，只有 namespace 缺失时才回读源 Manifest 的 `package`。
 - AabResGuard 改变了 APK 中的资源名称。`ResGuardMappingFileGenerator` 会把 Gradle mapping 转成 `inclink` 输入，确保新增/修改 XML 引用沿用已安装 APK 的混淆命名。
 
 `inclink` 的资源表是增量增加或覆盖，不负责删除旧 entry。删除 `res/` 文件不会生成资源移除数据，已安装 APK 或既有 overlay 中的旧 ID 和资源内容仍可通过 `Resources` 访问。高 API 属性曾生成的 `layout-v22` 等额外配置也不能直接删除，因此即使本轮移除了高版本属性，仍要输出对应配置覆盖旧 entry。这个约束使 `inclink` 适合开发期增量，不应被当作生产构建的完整资源链接器；只有需要让旧资源真正消失时，才通过完整 Gradle 构建刷新基线。

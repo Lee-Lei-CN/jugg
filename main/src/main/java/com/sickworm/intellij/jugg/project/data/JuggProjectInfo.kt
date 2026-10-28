@@ -467,7 +467,7 @@ data class ModuleBuildPathInfo(
 
     // use to fetch all class path after full build
     val allBuildPaths get() = listOf(legacyKotlinClassPath, builtInKotlinClassPath, kmpAndroidKotlinClassPath,
-        kmpJvmKotlinClassPath, javaClassPathNew, javaClassPathOld, rFilePathDir, moduleCompileRFileDir,
+        kmpJvmKotlinClassPath, javaClassPathNew, javaClassPathOld, rFilePathDir, rFilePathDirAgp9, moduleCompileRFileDir,
         kotlinClassPathForJavaLibrary, javaClassPathForJavaLibrary, generatedSourcePath,
         oldLibraryMergedManifestDir, libraryMergedManifestDir, applicationMergedManifestDir, libraryRFileDirInLowAgp,
         dataBindingInfoDir, dataBindingDependencyInfoDir, dataBindingArtifactDir,
