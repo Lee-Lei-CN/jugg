@@ -1,6 +1,6 @@
 # 代码路径速查表（Code Map）
 
-> 最后核对：2026-10-15
+> 最后核对：2026-10-27
 > 口径：生产代码目录（不含 `build/` 与 `src/test/`）  
 > 一致性规则：文档与代码冲突时，以代码为准。
 
@@ -70,7 +70,14 @@
 | Stub API 工具 | `tools/stub_api_generator/`, `deploy_compat/*.sh`, `deploy_compat/stub_api/` | 从已编译 compat JAR 的字节码引用闭包生成版本化 compile-only Stub；脚本负责创建模块、显式切换真实 JAR/Stub、生成 Stub，并通过 `verify_stub_api.sh` clean 构建两边产物后验证 AS API 调用一致性 |
 | cmd_line | `cmd_line/src/main/java/com/sickworm/intellij/jugg/cmdline/` | `CmdLine`, `BuildGradleBaseCommand`, `BuildIncrementalApkCommand` |
 | custom_compilers | `custom_compilers/src/main/java/com/sickworm/intellij/jugg/compiler/demo/` | SPI 自定义编译器示例 |
-| jvmti_agent | `jvmti_agent/src/main/cpp/` + `jvmti_agent/src/main/java/com/sickworm/intellij/jugg/` | JVMTI native 能力（`native-lib.cpp`、`instrumenter.cc`）+ runtime instrument 修复（`ApplyChangesOverlayPolicy`、`ResourceOverlays`、`FlutterAssetRefresh`、`NativeLibraryPathInstaller` 等）+ App 内 ViewHierarchy LocalSocket Server；`FlutterAssetRefresh` 先通过 App ClassLoader 确认 Flutter 存在，再在宿主 AssetManager 被 Apply Changes 重建后将当前 overlay-aware AssetManager 推送给存活 FlutterEngine，非 Flutter App 不修改 package-context AssetManager；`DragonflyHierarchySource` 是 dump、selector、tap、inspect、layout verify 的唯一节点数据源，Dragonfly DEX JAR 及内置 Kotlin/协程等依赖经离线预处理为 Jugg 私有包仅进入 APK runtime JAR，由 App ClassLoader 加载；instruments DEX 按 class definitions 禁止定义采集链，窗口枚举失败时 Best-effort 复用旧 ActivityThread/WindowManagerGlobal 根列表；由 `BootstrapApplication` 经 Context ClassLoader 反射初始化；首次启用 Compose 后异步让出一帧采集，节点诊断聚合为 warnings；`NativeLibraryPathInstaller` 在 startup hook 把已提交的 `code_cache/.overlay/<apkName>/lib/<abi>` 前置进 ClassLoader native 搜索路径 |
+| jvmti_agent | `jvmti_agent/src/main/cpp/` + `jvmti_agent/src/main/java/com/sickworm/intellij/jugg/` | JVMTI native 能力（`native-lib.cpp`、`instrumenter.cc`）+ runtime instrument 修复（`ApplyChangesOverlayPolicy`、`RuntimeSharedLibraries`、`ResourceOverlays`、`FlutterAssetRefresh`、`NativeLibraryPathInstaller` 等）+ App 内 ViewHierarchy LocalSocket Server；`FlutterAssetRefresh` 先通过 App ClassLoader 确认 Flutter 存在，再在宿主 AssetManager 被 Apply Changes 重建后将当前 overlay-aware AssetManager 推送给存活 FlutterEngine，非 Flutter App 不修改 package-context AssetManager；`DragonflyHierarchySource` 是 dump、selector、tap、inspect、layout verify 的唯一节点数据源，Dragonfly DEX JAR 及内置 Kotlin/协程等依赖经离线预处理为 Jugg 私有包仅进入 APK runtime JAR，由 App ClassLoader 加载；instruments DEX 按 class definitions 禁止定义采集链，窗口枚举失败时 Best-effort 复用旧 ActivityThread/WindowManagerGlobal 根列表；由 `BootstrapApplication` 经 Context ClassLoader 反射初始化；首次启用 Compose 后异步让出一帧采集，节点诊断聚合为 warnings；`NativeLibraryPathInstaller` 在 startup hook 把已提交的 `code_cache/.overlay/<apkName>/lib/<abi>` 前置进 ClassLoader native 搜索路径 |
+
+### GitHub Release 发布说明
+
+- 入口：`.github/workflows/release.yml` 的 Generate bilingual release notes 步骤；生成器为 `tools/generate_release_notes.rb <current-tag> <releases-json>`，回归入口为 `python3 -m unittest tools.test_generate_release_notes`。
+- workflow 用 `gh api --paginate --slurp` 读取所有 Release。脚本取低于当前版本的最高已发布正式版本作为下界，排除草稿、预发布和当前版本自身；tag 支持 `X.Y.Z` 或 `vX.Y.Z`，按数字比较，不依赖发布时间或 Latest 标记。
+- 数据源为中英文 `change_log/change_log_rc*.yaml`，读取 `(previous, current]`，合并后按 feature、optimize、bugfix 分类；组内按 YAML 日期升序，同日按数字版本升序，同版本内保留原条目顺序。双语版本、日期、数量及对应分类须一致，非法选中数据或无可靠下界时失败。
+- 发布标题仍为当前 tag；正文只保留语言和分类标题，内部版本及区间仅写入诊断日志。重跑会重新读取 Release 列表；生效代码来自 tag 对应提交。HTML、插件内和 Marketplace changelog 不参与这一生成流程。
 
 ---
 
@@ -85,6 +92,10 @@
 ---
 
 ## 5. 高频定位建议
+
+- Windows → macOS 真实工程：`RemoteGradleCompileClientTest.testRealProjectCompileAndFetch` 校验 APK 内容、classpath 和三阶段构建；`tools/windows-rsync/windows_rsync_project_benchmark.py` 测真实源码/产物传输。Windows 统一使用本机 Cygwin；证据与使用条件见 `docs/task/2026-10/windows_rsync_mac_real_acceptance.md`。
+
+- Windows rsync：`main/.../gradle/compile/WindowsRsyncRuntime.kt`（PATH 首个 rsync 及同目录工具检测、SSH argv）、`WindowsRsyncProbe.kt`（独立 best-effort 版本探测）、`NativeProcessDiagnostics.kt`（PID/退出码诊断与日志失败隔离）、`RemoteGradleCompileClient.invokeWindowsRsync()`（真实结果、链接单次恢复）；回归复用 `idea/.../gradle/RemoteGradleCompileClientTest.kt`。脱敏验收入口 `tools/windows-rsync/windows_rsync_acceptance.py` 复用 `tools/windows-rsync/windows_rsync_probe.py`；支持私钥/密码、完整 rsync 和多工程，树外链接不展开。真实工程 benchmark 为 `tools/windows-rsync/windows_rsync_project_benchmark.py`。配置见 `docs/task/2026-10/windows_rsync_test_setup.md`。 环境配置 UI 为 `idea/.../ide/ui/WindowsRsyncSetupDialog.kt`，`AskAiCompileUiHandler` 经结构化本地失败事件发布入口并阻止现场采集；规则见 `windows_rsync_path_setup_prompt.md`。
 
 - 查“某能力是否已存在”：先 `98_code_map.md`，再对应目录搜索类名。  
 - 查“编译为何回退”：从 `JuggCompilerHelper` -> `preprocessIncrementalCompile`。

@@ -1,6 +1,6 @@
 # 工程化：项目模型与 Gradle 集成
 
-> 最后核对：2026-10-14
+> 最后核对：2026-10-28
 > 一致性规则：文档与代码冲突时，以代码为准。
 
 ---
@@ -101,6 +101,8 @@ project info 的 `sourceDirs` 可以保留 build directory 下的 generated sour
 `compile_context.db/module_builds.json` writer 保持 version 2，reader 接受 version 1 和 2。version 1 缺失 `buildDirRelativePath` 时按空字符串恢复，因此仍保留 `complete_flag` 的旧用户无需重新全量构建；正常 version 2 的默认或自定义路径原样保留，损坏 version 2 缺失该字段时也按传统目录恢复。`complete_flag` 已缺失时不自动修复，仍需一次成功的 Jugg 全量构建重建上下文。
 
 androidTest synthetic module 命名为 `${module.name}.androidTest`，`buildVariant` 固定为 `debugAndroidTest`，并通过 `instrumentationTargetPackage` 标记为测试模块。IDE project info 创建时会使用 `AsDeployerCompat#getIdeModuleInfo` 暴露的 IDE Android 模型 test package / target package 信息；Chipmunk / Narwhal feature / Otter / Panda 继承链在 library self-targeting 场景下会 fallback 到 `selectedBasicVariant.testApplicationId`、`androidProject.testNamespace` 或 `${androidProject.namespace}.test`。只有 test package 与 target package 都有效时才把 IDE `.androidTest` module 标记为 androidTest module；`uninitialized.application.id` 会视为无效。若已有 Gradle project info，IDE 侧 `.androidTest` synthetic module 还必须出现在 Gradle androidTest module 集合中；若没有 Gradle 快照，则退化为要求 source root 下存在 Java/Kotlin 源码。Gradle merge 时这些 test 字段仍以 Gradle 非空值优先，并会丢弃 IDE-only androidTest module。
+
+androidTest variant 的完整 Manifest 可能仅位于 `intermediates/packaged_manifests/<variant>/process<Variant>Manifest/AndroidManifest.xml`。`ModuleBuildPathInfo` 将该目录纳入测试 variant 的 Manifest 候选与 `allBuildPaths`，确保远端完整构建后保留测试 APK 自己的增量基线；普通 variant 的 Manifest 候选保持不变。library main Manifest 同时作用于主 App 和 self-targeting Test APK 时，两边分别读取各自基线，不能把主 App 的 application 资源引用带入 Test APK。
 
 ---
 
@@ -208,17 +210,19 @@ Library androidTest 的 `instrumentationTargetPackage` 当前取 synthetic test 
 
 `RemoteGradleCompileClient.executeRemoteCommand()` 复用现有 SSH 认证、代理、环境变量、PTY 与取消能力，在 `remoteProjectPath` 下通过独立子 shell 和唯一完成标记执行一条非交互命令。该入口的单次 SSH connect 最长等待 30 秒，不做文件同步、APK/classpath 拉取或 deploy 编排，也不使用 Gradle 命令的 90 秒无输出超时。用户命令和终端输出只进入独立 Run Content；持久日志只记录命令类型、连接与退出结果，禁止记录命令正文。
 
-源码上传由 `SyncFileCommand.getRsyncArguments()` 统一生成 rsync/iFT 参数，使用 `-av --copy-unsafe-links --delete`：指向传输树之外的相对链接及绝对路径链接展开复制实际内容，支持 Repo linkfile 等工程外资源映射；传输树内的相对链接保留为链接。判断边界是实际传输根，源路径末尾的 `/` 和多工程同步范围会影响边界，不能只按 IDE 工程根判断。现有 include/exclude、增量比较和删除策略继续生效，本地链接及其源内容不变；展开目标缺失或不可读时保留 rsync 非零结果和错误输出，`syncSourceFile()` 返回失败并中止后续 Gradle 构建。APK/classpath 拉取参数不受此调整影响。
+远端同步根目录在 SSH shell ready 后、首次执行依赖目录的操作前解析：配置为空时使用远端实际 `$HOME/remote`，相对路径相对于远端 `$HOME`，显式绝对路径保持不变并跳过 HOME 查询。不根据操作系统或用户名猜测 home。HOME 查询失败、为空或不是绝对路径时明确失败，提示填写绝对远端根目录；不重试认证或回退到猜测路径。解析结果只保存在本次运行参数的 transient 字段中，供同步、构建和拉取使用；每次进入远端操作时通过 `TerminalOutputListener.onRemoteSyncPathResolved()` 通知当前输出解析器，使普通 Run、参数复制和重新连接后的日志映射不依赖 UI 与执行端共享参数对象。重新登录时清除解析结果，不改变用户配置或持久化格式。连接前界面展示 `$HOME` 形式的目录，日志解析器在取得绝对路径前不做目录替换。创建目录失败时保留目标目录、退出码和本次 `mkdir:` 错误输出，不再推断同步客户端未启动。
 
-依赖变化采用显式确认契约。检测到 build file 变化后，如果源码变化已经超过增量阈值，Jugg 先展示 Too many changes 确认；只有用户选择本轮继续增量，才展示 build file diff。未超过阈值时直接展示文件 diff。用户可选择读取依赖变化、忽略本轮 build file 变化、回退 Gradle 或取消；只有用户确认后才把依赖库产物转换为 `ChangedFile` 进入增量编译。原因是 build script 可以改变任意构建行为，仅凭依赖列表无法证明 APK 其他部分没有变化，自动猜测会把无法判定的风险伪装成成功。
+源码上传由 `SyncFileCommand.getRsyncArguments()` 统一生成 rsync/iFT 参数，使用 `-av --delete`。仅 Windows 不添加 `--copy-unsafe-links`，保留链接本身，不读取树外链接目标；macOS/Linux 保留该参数，继续复制树外链接目标。Windows 工程需要树外内容时，应扩大完整 rsync 的同步根目录或事先物化文件；保留的链接在远端不保证可解析。include/exclude、增量比较和删除策略继续生效。
 
-Gradle diff 同时保留两个比较基线：`diffResult` 对比上一次构建依赖，用于展示本轮新增、删除和升级；`diffResultWithFull` 对比最近一次完整 Gradle 基线，用于确定真正需要编译、替换或回滚的 library 文件。library dex 可能在 APK 中合并为单个产物，不能只按上一轮增量结果推断旧 jar。用户选择“忽略”只表示接受当前 build file 对开发链路无影响，不代表 Jugg 已验证脚本等价；出现异常时仍应完整 Gradle 刷新基线。
+Windows x64 本地 NTFS 到 Linux/macOS 使用 `WindowsRsyncRuntime` 的原生 argv 进程，远端 uname 仅接受 Linux/Darwin，支持 `rsync_simple`、完整 `rsync` 和多工程；Windows 路径在边界转换，classpath 返回实际下载位置。Windows 统一使用本机 Cygwin 的 rsync、ssh 和 cygpath；严格使用 PATH 中第一个 rsync.exe 及同目录 ssh/cygpath，工具缺失或实际启动失败提示具体路径、原因和配置 Prompt 入口，不自动安装。首次版本探测为独立 best-effort 诊断，失败记录后继续实际流程，不额外复测。私钥及密码均沿既有远端连接配置读取；发现的密钥与有效密码并存时，外部 SSH 先尝试公钥，再允许密码或 keyboard-interactive 回退，密码仅通过子进程环境与 askpass 传递。Windows rsync 上传后，在完整构建前为 compileCommand 指定且位于工程内的相对 gradlew 设置 Unix 执行位；依赖变化检测固定执行 `./gradlew --dry-run`，因此在本轮上传后独立准备工程根目录的 wrapper，不依赖配置的完整构建命令。该处理覆盖 Cygwin 读取到的源 wrapper 无执行位、上传覆盖远端权限的条件；仅拉取和非 Windows 路径不变。直接进程保留真实退出码和取消结果；本地 backup classpath 继续关闭。
 
-runtime library 是否参与依赖 diff 由最近一次完整构建保存的 project info 决定，不提升 `full_build_info.json` 序列化版本。旧完整构建基线的 `runtimeLibraryDependencies` 为空时，Jugg 保留原有 compile dependency diff，不让已有 compile context 失效，也不强制升级用户立即完整构建。之后任一次成功完整 Gradle 构建记录了非空 runtime library 基线，后续两个依赖 diff 才统一加入 runtime library；如果完整基线确实没有 runtime 外部库，第一次新增纯 runtime-only 库仍需等下一次完整构建后才能进入后续 diff。
+Windows rsync 参数和环境准备阶段，仅对 cygpath 路径转换的 `STATUS_SHARING_VIOLATION`（`-1073741757`）等待 3 秒重试一次，期间可取消；第二次失败报告最终异常，不重放实际传输。其他错误和 best-effort 版本探测保持原行为。
 
-APK 查找规则以 Run Configuration 的 output pattern 为入口；自动生成的 pattern 使用 IDE Android model 暴露的实际 build folder。androidTest pattern 从 `/outputs/apk/` 片段派生，因此同时支持 `app/build/...` 与项目根集中式 `build/app/...`。远端 classpath 同步使用相对项目根的 build output 路径，保证自定义 build directory 能回写到本地相同位置。
+FindOutputCommand 在只指定 APK 文件名时显式使用 `find .`，兼容 BSD find。
 
-远端 classpath 的 rsync 过滤规则会按 build directory 类型生成：使用 `${moduleRoot}/build` 的普通模块按 variant 复用 `build/...` 规则，避免大型多模块工程为每个模块重复展开相同参数；自定义 build directory、`customClasspath` 与 `customSyncFilePath` 继续使用项目根相对的精确路径，保证集中式输出和项目配置不会被通配规则覆盖。
+验收复用 `idea/.../gradle/RemoteGradleCompileClientTest`：`testSimulated*ArtifactFetch` 覆盖三种同步布局，真实上传后用 Python 生成所有产物目录的小文件，验证 APK/classpath、原生链接、失败和取消；`testSimulatedCancellation` 验证 JSch shell 取消。`testRealProjectCompileAndFetch` 实际构建 demo 工程，验证首次/无变化/资源修改后的 APK 内容和 classpath，并记录耗时；它不代表设备部署已通过。脱敏小夹具矩阵见 `tools/windows-rsync/windows_rsync_acceptance.py`，真实工程传输计时见 `tools/windows-rsync/windows_rsync_project_benchmark.py`；服务器、JSON 及定向命令见 [测试准备](../task/2026-10/windows_rsync_test_setup.md)。
+
+远端 classpath 的 rsync 过滤规则会按 build directory 类型生成：使用 `${moduleRoot}/build` 的普通模块按 variant 复用 `**/build/...` 规则，显式匹配嵌套模块，避免大型多模块工程为每个模块重复展开相同参数；自定义 build directory、`customClasspath` 与 `customSyncFilePath` 继续使用项目根相对的精确路径，保证集中式输出和项目配置不会被通配规则覆盖。
 
 `JuggCompilerHelper.gradleCompile()` 会在进入 Gradle 客户端前调用 `GradleWrapperRepairer`。该逻辑只处理 `compileCommand` 中使用 `gradlew` / `gradlew.bat` 的场景：若对应目录存在 `gradle/wrapper/gradle-wrapper.properties`，则从 Jugg 内置资源补齐缺失的 `gradlew`、`gradlew.bat`、`gradle/wrapper/gradle-wrapper.jar`，并为 `gradlew` 设置可执行权限；若 properties 不存在或命令不是 wrapper 入口，则不修改工程。补齐只创建缺失文件，不覆盖已有文件。Windows 本机执行远程编译时，还会在同步前将实际使用的 Unix `gradlew` 中 CRLF 转换为 LF；转换只在内容变化时写回，不处理 `gradlew.bat`、其他脚本或 Gradle 配置文件，纯本地编译与仅拉取远端结果均保持原文件不变。
 
@@ -257,7 +261,7 @@ APK 拉取全部成功后，`LocalGradleCompileClient` / `RemoteGradleCompileCli
 - 远端 classpath 过滤规则不能随普通模块数量线性增长；普通 `${moduleRoot}/build` 输出按 variant 去重，自定义 build directory 与配置路径保持精确。
 - `ModuleBuildPathInfo.allBuildPathRelative` 包含当前 variant 的 `intermediates/data_binding_artifact`，确保远端 Gradle 编译生成的 DataBinding setter store 等产物会同步回本地。
 - `ModuleBuildPathInfo` 把 Gradle R.jar 分成两个语义集合，集合之间不比较：application aggregate 集合（`rFilePathCandidates`：`compile_and_runtime_r_class_jar` / `compile_and_runtime_not_namespaced_r_class_jar`）和 module compile 集合（`moduleCompileRFileCandidates`：AGP 7.4+ 的 `compile_r_class_jar` 与 legacy `compile_only_not_namespaced_r_class_jar`）。两个集合内部都在多个候选并存时按 `lastModifiedTime` 选最新，mtime 相同时保留候选声明顺序；`BaseCompileContext` 会在多候选时打印 debug 日志。`moduleCompileRFile` 没有真实候选时为 `null`，不制造不存在的现代路径。
-- `ModuleBuildPathInfo.allClassPath` 只包含模块的普通 Gradle 输出，不包含任何 Gradle R.jar：R provider 由 `BaseCompileContext` 按模块身份选择并追加，避免同一 module 同时暴露 modern 与 legacy R 布局。synthetic androidTest 虽然建模为 `Library`，但必须使用自身 test variant 的 aggregate R，不能回落到 owner module 的主 variant R。`allBuildPaths` 同时包含 aggregate 目录和 `compile_r_class_jar`，保证远端 full build 后两种集合都能同步回本地。
+- `ModuleBuildPathInfo.allClassPath` 只包含模块的普通 Gradle 输出，不包含任何 Gradle R.jar：R provider 由 `BaseCompileContext` 按模块身份选择并追加，避免同一 module 同时暴露 modern 与 legacy R 布局。synthetic androidTest 虽然建模为 `Library`，但必须使用自身 test variant 的 aggregate R，不能回落到 owner module 的主 variant R。`allBuildPaths` 同时包含 AGP 9 的 `compile_and_runtime_r_class_jar`、旧版 `compile_and_runtime_not_namespaced_r_class_jar` 和 `compile_r_class_jar`，保证本地基线备份与远端同步保留主 variant 和 androidTest variant 各自的 R.jar。已有缓存缺少这些文件时，通过完整构建后的基线同步补齐。
 - `ModuleBuildPathInfo.javaClassPath` 在 `intermediates/javac/<variant>/classes` 与 `compile<Variant>JavaWithJavac/classes` 并存时同样按 `lastModifiedTime` 选择最新目录；`allClassPath` 只挂载解析后的单一 Java 输出目录，避免 AGP 升级后旧目录 shadow 新 class。
 - `readProjectInfo.gradle.kts` 读取依赖时使用上次 project info 做 CRC 缓存，但不能只依赖缓存，因为 transitive dependency 信息可能不完整。
 - `:idea:prepareSandbox` 必须把仓库 `third_party`（排除 `sources` payload）、根目录 `THIRD_PARTY_NOTICES.md`、生成的 `SOURCE.md` 和源码校验值放入 `jugg/third_party`；对应源码保留在 `SOURCE.md` 指向的公开不可变 Git revision。`:idea:buildPlugin` 结束后由 `verifyThirdPartyCompliance` 校验 104 行组件清单、固定许可证选择、许可证/源码定位/修改声明、仓库源码 SHA-256、CI 源码 Git 状态、插件内无源码 payload、合规数据压缩后不超过 256 KiB，以及 104 个 package 的 SPDX 2.3 SBOM。第三方资产缺失或不匹配必须让发行构建失败，不能降级为 warning。

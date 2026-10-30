@@ -368,26 +368,7 @@ class JuggCompilerHelper(
                     "isShouldCheck: $isShouldCheck")
 
             if (isShouldCheck) {
-                try {
-                    val startTime = System.currentTimeMillis()
-                    if (uncompiledFiles.size > 100) {
-                        logger.info("Checking files whether is really changed...")
-                    }
-                    val rollbackFiles = deployHistoryManager.filterUnchangedFiles(uncompiledFiles.map { it.file })
-                    if (rollbackFiles.isNotEmpty()) {
-                        logger.debug("Found files rollback, size: ${rollbackFiles.size}, files: ${rollbackFiles.map { it.name }}")
-                        deployFileManager.removeChangedFile(rollbackFiles)
-                    } else {
-                        logger.debug("No files rollback.")
-                    }
-                    val costTime = System.currentTimeMillis() - startTime
-
-                    if (uncompiledFiles.size > 100) {
-                        logger.info("Checking finished, cost ${costTime}ms. Rollback files ${rollbackFiles.size}.")
-                    }
-                } catch (e: Exception) {
-                    logger.debug("Check files whether is really changed failed: ${e.message}", e)
-                }
+                gitFileChangesDetector.rollbackUnchangedFiles(uncompiledFiles)
             }
         }
     }
@@ -396,7 +377,7 @@ class JuggCompilerHelper(
         options: JuggGradleCompileOptions,
         uiHandler: CompileUiHandler,
     ): CompileTaskResult? {
-        val gitRefreshResult = gitFileChangesDetector.refreshChangedFilesIfHeadChanged()
+        val gitRefreshResult = gitFileChangesDetector.refreshFileChangesIfHeadChanged()
         val isLastGradleCompileFailed = deployHistoryManager.isLastFullCompileFailed
         logger.debug("preprocessIncrementalCompile isForceInstall ${uiHandler.isForceGradleCompile}, " +
                 "gitRefreshResult=$gitRefreshResult")

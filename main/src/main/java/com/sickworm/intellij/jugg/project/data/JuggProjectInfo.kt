@@ -427,10 +427,13 @@ data class ModuleBuildPathInfo(
     // in AGP 8.x, application module has both merged_manifests and merged_manifest directory,
     // so it cannot use to detect application module
     private val applicationMergedManifestDir get() = File(buildDir, "intermediates/merged_manifests/$buildVariant")
+    private val androidTestPackagedManifestDir get() = File(buildDir, "intermediates/packaged_manifests/$buildVariant")
+        .takeIf { buildVariant.endsWith("AndroidTest") }
 
     // compatible with AGP 8.x, which path like merged_manifests/debug/processDebugManifest/AndroidManifest.xml
     // prefer the newest manifest within each directory to avoid stale AGP 7 outputs shadowing the current AGP 8 output
-    val mergedManifest get() = listOf(oldLibraryMergedManifestDir, applicationMergedManifestDir, libraryMergedManifestDir)
+    val mergedManifest get() = listOfNotNull(oldLibraryMergedManifestDir, applicationMergedManifestDir,
+        libraryMergedManifestDir, androidTestPackagedManifestDir)
         .flatMap { it.findManifestCandidates() }
         .newestFile() ?: File(libraryMergedManifestDir, "AndroidManifest.xml")
 
@@ -464,13 +467,13 @@ data class ModuleBuildPathInfo(
 
     // use to fetch all class path after full build
     val allBuildPaths get() = listOf(legacyKotlinClassPath, builtInKotlinClassPath, kmpAndroidKotlinClassPath,
-        kmpJvmKotlinClassPath, javaClassPathNew, javaClassPathOld, rFilePathDir, moduleCompileRFileDir,
+        kmpJvmKotlinClassPath, javaClassPathNew, javaClassPathOld, rFilePathDir, rFilePathDirAgp9, moduleCompileRFileDir,
         kotlinClassPathForJavaLibrary, javaClassPathForJavaLibrary, generatedSourcePath,
         oldLibraryMergedManifestDir, libraryMergedManifestDir, applicationMergedManifestDir, libraryRFileDirInLowAgp,
         dataBindingInfoDir, dataBindingDependencyInfoDir, dataBindingArtifactDir,
         applicationDataBindingIntoTypeDir, libraryDataBindingIntoTypeDir,
         mappingFile, usageFile, aabResGuardMappingFile
-    ) + customClasspathFiles + customSyncFiles
+    ) + listOfNotNull(androidTestPackagedManifestDir) + customClasspathFiles + customSyncFiles
 
     val allBuildPathRelative get() = allBuildPaths.map { it.relativeTo(projectRootDir) }
 
